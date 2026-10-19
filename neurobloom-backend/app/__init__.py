@@ -21,7 +21,8 @@ def create_app():
     CORS(app)
     
     # Register blueprints
-    from app.routes import student_bp, teacher_bp, assessment_bp
+    from app.routes import auth_bp, student_bp, teacher_bp, assessment_bp
+    app.register_blueprint(auth_bp)
     app.register_blueprint(student_bp)
     app.register_blueprint(teacher_bp)
     app.register_blueprint(assessment_bp)

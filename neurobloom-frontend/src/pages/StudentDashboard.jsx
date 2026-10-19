@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Row, Col, Button, ProgressBar, Alert } from 'react-bootstrap';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import axios from 'axios';
 
 const API_URL = 'http://localhost:5000/api';
@@ -11,32 +10,62 @@ function StudentDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const user = JSON.parse(localStorage.getItem('user'));
-
   useEffect(() => {
-    fetchStudentData();
-  }, []);
+    const controller = new AbortController();
+    const storedUser = localStorage.getItem('user');
 
-  const fetchStudentData = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get(`${API_URL}/student/profile`, {
-        params: { student_id: user.student_id }
-      });
-      setStudentData(response.data);
-
-      // Fetch assessments
-      const assessmentResponse = await axios.get(`${API_URL}/assessment/history`, {
-        params: { student_id: user.student_id }
-      });
-      setAssessments(assessmentResponse.data);
-    } catch (err) {
-      setError('Failed to load student data');
-      console.error(err);
-    } finally {
+    if (!storedUser) {
+      setError('Your session has expired. Please log in again.');
       setLoading(false);
+      return () => controller.abort();
     }
-  };
+
+    let user;
+    try {
+      user = JSON.parse(storedUser);
+    } catch {
+      localStorage.removeItem('user');
+      setError('Your saved session is invalid. Please log in again.');
+      setLoading(false);
+      return () => controller.abort();
+    }
+
+    if (!Number.isInteger(user.student_id)) {
+      setError('This account has no student profile. Please log out and sign up or log in again.');
+      setLoading(false);
+      return () => controller.abort();
+    }
+
+    const fetchStudentData = async () => {
+      try {
+        const [profileResponse, assessmentResponse] = await Promise.all([
+          axios.get(`${API_URL}/student/profile`, {
+            params: { student_id: user.student_id },
+            signal: controller.signal
+          }),
+          axios.get(`${API_URL}/assessment/history`, {
+            params: { student_id: user.student_id },
+            signal: controller.signal
+          })
+        ]);
+        setStudentData(profileResponse.data);
+        setAssessments(assessmentResponse.data);
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        if (err.response?.status === 404) {
+          setError('Student profile not found. Please log out and sign up or log in again.');
+        } else {
+          setError(err.response?.data?.error || 'Failed to load student data. Check that the backend is running.');
+        }
+        console.error(err);
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    };
+
+    fetchStudentData();
+    return () => controller.abort();
+  }, []);
 
   if (loading) return <div>Loading...</div>;
   if (error) return <Alert variant="danger">{error}</Alert>;
@@ -87,7 +116,7 @@ function StudentDashboard() {
                     <div key={idx} className="mb-3 p-3 border rounded">
                       <strong>{assessment.assessment_type}</strong>
                       <ProgressBar 
-                        now={(1 - assessment.risk_score) * 100}
+                        now={assessment.risk_score * 100}
                         label={`Risk Score: ${(assessment.risk_score * 100).toFixed(1)}%`}
                         variant={assessment.risk_score > 0.6 ? 'danger' : 'success'}
                         className="mt-2"

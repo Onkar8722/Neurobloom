@@ -15,7 +15,7 @@ NeuroBloom is a React and Flask learning-support prototype with reading, writing
 ## Requirements
 
 - Python 3.12
-- Node.js and npm
+- Node.js 20.19+ or 22.12+ and npm
 
 ## Run locally
 
@@ -40,7 +40,7 @@ npm ci
 npm start
 ```
 
-Open `http://localhost:3000`. The current frontend uses `http://localhost:5000/api` for API requests.
+Open the Vite URL shown in the terminal (usually `http://localhost:5173`). The frontend uses `http://localhost:5000/api` for API requests.
 
 ## Project layout
 

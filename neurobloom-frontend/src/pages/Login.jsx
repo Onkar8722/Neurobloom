@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Card, Form, Button, Alert, Tabs, Tab } from 'react-bootstrap';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 
 const API_URL = 'http://localhost:5000/api';
 
@@ -16,49 +17,51 @@ function Login({ setUser }) {
   });
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('login');
+  const [submitting, setSubmitting] = useState(false);
+  const navigate = useNavigate();
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    setError(null);
+    setSubmitting(true);
     try {
-      // Mock authentication - in production, call actual backend
-      const userData = {
-        id: 1,
+      const response = await axios.post(`${API_URL}/auth/login`, {
         username: loginData.username,
-        user_type: loginData.userType,
-        student_id: 1
-      };
-      
+        password: loginData.password,
+        user_type: loginData.userType
+      });
+      const userData = response.data;
       localStorage.setItem('user', JSON.stringify(userData));
-      localStorage.setItem('token', 'mock-token');
       setUser(userData);
-      window.location.href = '/dashboard';
+      navigate('/dashboard');
     } catch (err) {
-      setError('Login failed');
-      console.error(err);
+      setError(err.response?.data?.error || 'Unable to log in. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleSignup = async (e) => {
     e.preventDefault();
+    setError(null);
+    setSubmitting(true);
     try {
-      // Mock signup - in production, call actual backend
-      const userData = {
-        id: 2,
+      const response = await axios.post(`${API_URL}/auth/signup`, {
         username: signupData.username,
         email: signupData.email,
+        password: signupData.password,
         user_type: signupData.userType,
-        student_id: 2,
-        age: signupData.age,
+        age: signupData.age || null,
         grade_level: signupData.grade_level
-      };
-      
+      });
+      const userData = response.data;
       localStorage.setItem('user', JSON.stringify(userData));
-      localStorage.setItem('token', 'mock-token');
       setUser(userData);
-      window.location.href = '/dashboard';
+      navigate('/dashboard');
     } catch (err) {
-      setError('Signup failed');
-      console.error(err);
+      setError(err.response?.data?.error || 'Unable to sign up. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -90,6 +93,7 @@ function Login({ setUser }) {
                     value={loginData.password}
                     onChange={(e) => setLoginData({...loginData, password: e.target.value})}
                     required
+                    minLength={8}
                   />
                 </Form.Group>
 
@@ -105,8 +109,8 @@ function Login({ setUser }) {
                   </Form.Select>
                 </Form.Group>
 
-                <Button type="submit" variant="primary" className="w-100">
-                  Login
+                <Button type="submit" variant="primary" className="w-100" disabled={submitting}>
+                  {submitting ? 'Logging in...' : 'Login'}
                 </Button>
               </Form>
             </Tab>
@@ -140,6 +144,7 @@ function Login({ setUser }) {
                     value={signupData.password}
                     onChange={(e) => setSignupData({...signupData, password: e.target.value})}
                     required
+                    minLength={8}
                   />
                 </Form.Group>
 
@@ -177,8 +182,8 @@ function Login({ setUser }) {
                   </>
                 )}
 
-                <Button type="submit" variant="success" className="w-100">
-                  Sign Up
+                <Button type="submit" variant="success" className="w-100" disabled={submitting}>
+                  {submitting ? 'Creating account...' : 'Sign Up'}
                 </Button>
               </Form>
             </Tab>

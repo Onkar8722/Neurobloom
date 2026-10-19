@@ -7,17 +7,127 @@ from app.models import (
 from utils.ml_models import DyslexiaDetector, DysgraphiaDetector
 from utils.nlp_processor import process_text, analyze_writing
 from datetime import datetime
+from sqlalchemy.exc import IntegrityError
+from werkzeug.security import check_password_hash, generate_password_hash
 
+auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 student_bp = Blueprint('student', __name__, url_prefix='/api/student')
 teacher_bp = Blueprint('teacher', __name__, url_prefix='/api/teacher')
 assessment_bp = Blueprint('assessment', __name__, url_prefix='/api/assessment')
+
+# ==================== Authentication Routes ====================
+
+@auth_bp.route('/signup', methods=['POST'])
+def signup():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'A JSON object is required'}), 400
+    username = data.get('username')
+    email = data.get('email')
+    password = data.get('password', '')
+    user_type = data.get('user_type')
+
+    if not isinstance(username, str) or not isinstance(email, str):
+        return jsonify({'error': 'A username and valid email are required'}), 400
+    username = username.strip()
+    email = email.strip().lower()
+    if not username or not email or not isinstance(password, str) or len(password) < 8:
+        return jsonify({'error': 'Username, email, and a password of at least 8 characters are required'}), 400
+    if len(username) > 80 or len(email) > 120:
+        return jsonify({'error': 'Username or email is too long'}), 400
+    if not isinstance(user_type, str) or user_type not in {'student', 'teacher', 'parent'}:
+        return jsonify({'error': 'Invalid user type'}), 400
+
+    if User.query.filter(
+        db.or_(User.username == username, User.email == email)
+    ).first():
+        return jsonify({'error': 'Username or email is already registered'}), 409
+
+    user = User(
+        username=username,
+        email=email,
+        password_hash=generate_password_hash(password),
+        user_type=user_type
+    )
+    db.session.add(user)
+
+    if user_type == 'student':
+        age = data.get('age')
+        grade_level = data.get('grade_level', '')
+        if not isinstance(grade_level, str):
+            db.session.rollback()
+            return jsonify({'error': 'Grade level must be text'}), 400
+        if age not in (None, ''):
+            try:
+                age = int(age)
+            except (TypeError, ValueError):
+                db.session.rollback()
+                return jsonify({'error': 'Age must be a whole number'}), 400
+            if not 3 <= age <= 120:
+                db.session.rollback()
+                return jsonify({'error': 'Age must be between 3 and 120'}), 400
+
+        db.session.flush()
+        db.session.add(StudentProfile(
+            user_id=user.id,
+            age=age or None,
+            grade_level=grade_level.strip() or None,
+            learning_disabilities=[]
+        ))
+    elif user_type == 'teacher':
+        db.session.flush()
+        from app.models import TeacherProfile
+        db.session.add(TeacherProfile(user_id=user.id))
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({'error': 'Username or email is already registered'}), 409
+
+    return jsonify(_serialize_user(user)), 201
+
+
+@auth_bp.route('/login', methods=['POST'])
+def login():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'A JSON object is required'}), 400
+    username = data.get('username')
+    password = data.get('password', '')
+    user_type = data.get('user_type')
+
+    user = User.query.filter_by(username=username.strip()).first() if isinstance(username, str) and username.strip() else None
+    if (
+        not user
+        or not isinstance(password, str)
+        or not check_password_hash(user.password_hash, password)
+        or (user_type and (not isinstance(user_type, str) or user.user_type != user_type))
+    ):
+        return jsonify({'error': 'Invalid username or password'}), 401
+
+    return jsonify(_serialize_user(user)), 200
+
+
+def _serialize_user(user):
+    return {
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'user_type': user.user_type,
+        'student_id': user.student_profile.id if user.student_profile else None
+    }
+
 
 # ==================== Student Routes ====================
 
 @student_bp.route('/profile', methods=['GET'])
 def get_student_profile():
     """Get student profile"""
-    student_id = request.args.get('student_id')
+    student_id = request.args.get('student_id', type=int)
+    if student_id is None:
+        return jsonify({'error': 'A valid student_id is required'}), 400
+
     student = StudentProfile.query.get(student_id)
     
     if not student:
@@ -30,6 +140,29 @@ def get_student_profile():
         'grade_level': student.grade_level,
         'learning_disabilities': student.learning_disabilities
     }), 200
+
+
+@assessment_bp.route('/history', methods=['GET'])
+def get_assessment_history():
+    student_id = request.args.get('student_id', type=int)
+    if student_id is None:
+        return jsonify({'error': 'A valid student_id is required'}), 400
+
+    if not StudentProfile.query.get(student_id):
+        return jsonify({'error': 'Student not found'}), 404
+
+    assessments = Assessment.query.filter_by(student_id=student_id).order_by(
+        Assessment.created_at.desc()
+    ).all()
+    return jsonify([
+        {
+            'id': assessment.id,
+            'assessment_type': assessment.assessment_type,
+            'risk_score': assessment.risk_score,
+            'created_at': assessment.created_at.isoformat()
+        }
+        for assessment in assessments
+    ]), 200
 
 
 @student_bp.route('/reading-activity', methods=['POST'])
